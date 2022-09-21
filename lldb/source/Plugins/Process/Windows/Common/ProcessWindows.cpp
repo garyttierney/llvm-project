@@ -715,18 +715,17 @@ ProcessWindows::OnDebugException(bool first_chance,
     return ExceptionResult::SendToApplication;
   }
 
+  // TODO (gtierney): parity with WinDbg, allow passing and not stopping on
+  // second chance exceptions
   if (!first_chance) {
     // Not any second chance exception is an application crash by definition.
     // It may be an expression evaluation crash.
     SetPrivateState(eStateStopped);
   }
 
-  ExceptionResult result = ExceptionResult::SendToApplication;
   switch (record.GetExceptionCode()) {
   case EXCEPTION_BREAKPOINT:
-    // Handle breakpoints at the first chance.
-    result = ExceptionResult::BreakInDebugger;
-
+    // Unconditionally handle initial break-in at the first chance.
     if (!m_session_data->m_initial_stop_received) {
       LLDB_LOG(
           log,
@@ -734,29 +733,29 @@ ProcessWindows::OnDebugException(bool first_chance,
           record.GetExceptionAddress());
       m_session_data->m_initial_stop_received = true;
       ::SetEvent(m_session_data->m_initial_stop_event);
-    } else {
-      LLDB_LOG(log, "Hit non-loader breakpoint at address {0:x}.",
-               record.GetExceptionAddress());
+
+      SetPrivateState(eStateStopped);
+      return ExceptionResult::BreakInDebugger;
     }
-    SetPrivateState(eStateStopped);
     break;
   case EXCEPTION_SINGLE_STEP:
-    result = ExceptionResult::BreakInDebugger;
     SetPrivateState(eStateStopped);
-    break;
-  default:
-    LLDB_LOG(log,
-             "Debugger thread reported exception {0:x} at address {1:x} "
-             "(first_chance={2})",
-             record.GetExceptionCode(), record.GetExceptionAddress(),
-             first_chance);
-    // For non-breakpoints, give the application a chance to handle the
-    // exception first.
-    if (first_chance)
-      result = ExceptionResult::SendToApplication;
-    else
-      result = ExceptionResult::BreakInDebugger;
+    return ExceptionResult::BreakInDebugger;
   }
+
+  // TODO (gtierney): parity with WinDbg, allow per-exception
+  // ignore/break/second chance break configuration
+  ExceptionResult result = ExceptionResult::SendToApplication;
+  LLDB_LOG(log,
+           "Debugger thread reported exception {0:x} at address {1:x} "
+           "(first_chance={2})",
+           record.GetExceptionCode(), record.GetExceptionAddress(),
+           first_chance);
+
+  // TODO (gtierney): until behaviour can be configured per-exception,
+  // always give the inferior a chance to handle the exception first.
+  if (!first_chance)
+    result = ExceptionResult::BreakInDebugger;
 
   return result;
 }
